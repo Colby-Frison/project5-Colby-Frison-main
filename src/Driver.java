@@ -155,7 +155,7 @@ public class Driver extends JFrame implements JMapViewerEventListener {
                     }
                     map().removeAllMapMarkers();
                 } else {
-                    setMapCenterAndZoom();
+                    map().removeAllMapPolygons(); 
                     // Start the animation
                     isPlaying = true;
                     playButton.setText("Reset");
@@ -280,6 +280,20 @@ public class Driver extends JFrame implements JMapViewerEventListener {
     }
 
     private void animateTrip() {
+
+        double avgLat = 0;
+        double avgLon = 0;
+        int cnt = 0;
+        for (TripPoint point : trip) {
+            avgLat += point.getLat();
+            avgLon += point.getLon();
+            cnt++;
+        }
+
+
+        // Set map center and zoom level
+        map().setDisplayPosition(new Coordinate(avgLat/cnt, avgLon/cnt), 6);
+
         // Retrieve selected options
         int animationTime = (int) animationTimeComboBox.getSelectedItem();
         boolean includeStops = stopsCheckBox.isSelected();
@@ -314,8 +328,9 @@ public class Driver extends JFrame implements JMapViewerEventListener {
                         dot.setColor(Color.RED);
                         dot.setBackColor(Color.RED);
 
-
                         map().addMapPolygon(dot);
+
+                        //map().setDisplayPosition(coordinate, 7);
 
                         SwingUtilities.invokeLater(() -> map().repaint());
 
@@ -342,30 +357,4 @@ public class Driver extends JFrame implements JMapViewerEventListener {
         }).start();
     }
 
-
-    // Set the map center and zoom level
-    private void setMapCenterAndZoom() {
-        // Calculate bounding box of the trip
-        double minLat = Double.MAX_VALUE;
-        double maxLat = Double.MIN_VALUE;
-        double minLon = Double.MAX_VALUE;
-        double maxLon = Double.MIN_VALUE;
-        for (TripPoint point : trip) {
-            double lat = point.getLat();
-            double lon = point.getLon();
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
-            if (lon < minLon) minLon = lon;
-            if (lon > maxLon) maxLon = lon;
-        }
-
-        // Calculate map center and zoom level
-        double centerLat = (minLat + maxLat) / 2;
-        double centerLon = (minLon + maxLon) / 2;
-        int zoom = (int) Math.max(maxLat - minLat, maxLon - minLon) * 100;
-
-        // Set map center and zoom level
-        map().setDisplayPosition(new Coordinate(centerLat, centerLon), zoom);
-    }
-    
 }
