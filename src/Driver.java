@@ -1,6 +1,8 @@
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -32,8 +34,10 @@ import org.openstreetmap.gui.jmapviewer.JMapViewerTree;
 import org.openstreetmap.gui.jmapviewer.MapMarkerCircle;
 import org.openstreetmap.gui.jmapviewer.MapMarkerDot;
 import org.openstreetmap.gui.jmapviewer.MapPolygonImpl;
+import org.openstreetmap.gui.jmapviewer.MapRectangleImpl;
 import org.openstreetmap.gui.jmapviewer.OsmTileLoader;
 import org.openstreetmap.gui.jmapviewer.events.JMVCommandEvent;
+import org.openstreetmap.gui.jmapviewer.interfaces.ICoordinate;
 import org.openstreetmap.gui.jmapviewer.interfaces.JMapViewerEventListener;
 import org.openstreetmap.gui.jmapviewer.interfaces.MapMarker;
 import org.openstreetmap.gui.jmapviewer.interfaces.MapPolygon;
@@ -76,6 +80,10 @@ public class Driver extends JFrame implements JMapViewerEventListener {
     private static ArrayList<TripPoint> trip;
     private static ArrayList<TripPoint> movingTrip;
 
+    private Thread animationThread;
+
+    private List<? extends ICoordinate> points;
+
     private static TripPoint[] animatedTrip;
 
     public Driver() throws FileNotFoundException, IOException {
@@ -88,8 +96,6 @@ public class Driver extends JFrame implements JMapViewerEventListener {
 
         raccoonImage = Toolkit.getDefaultToolkit().getImage("raccoon.png");
         
-
-        setSize(400, 400);
 
         treeMap = new JMapViewerTree("Zones");
 
@@ -134,13 +140,32 @@ public class Driver extends JFrame implements JMapViewerEventListener {
         playButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                if(isPlaying){
-                    
-                }
-                else{
+                if (isPlaying) {
+                    // Stop the animation
+                    isPlaying = false;
+
+                    playButton.setText("Play");
+                    animationTimeComboBox.setEnabled(true);
+                    stopsCheckBox.setEnabled(true);
+            
+                    // Interrupt the animation thread if it's running
+                    if (animationThread != null && animationThread.isAlive()) {
+                        animationThread.interrupt();
+                        map().removeAllMapMarkers();
+                    }
+                    map().removeAllMapMarkers();
+                } else {
+                    setMapCenterAndZoom();
+                    // Start the animation
                     isPlaying = true;
                     playButton.setText("Reset");
-                    animateTrip();
+            
+                    animationTimeComboBox.setEnabled(false);
+                    stopsCheckBox.setEnabled(false);
+            
+                    // Start a new animation thread
+                    animationThread = new Thread(() -> animateTrip());
+                    animationThread.start();
                 }
             }
         });
@@ -159,13 +184,7 @@ public class Driver extends JFrame implements JMapViewerEventListener {
         JLabel helpLabel = new JLabel("Use right mouse button to move,\n "
                 + "left double click or mouse wheel to zoom.");
         helpPanel.add(helpLabel);
-        JButton button = new JButton("setDisplayToFitMapMarkers");
-        button.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                map().setDisplayToFitMapMarkers();
-            }
-        });
+
         JComboBox<TileSource> tileSourceSelector = new JComboBox<>(new TileSource[] {
 
             /// these are all the version of maps the JMapViewer has avaialbe
@@ -260,14 +279,13 @@ public class Driver extends JFrame implements JMapViewerEventListener {
         }
     }
 
-    // Animate the trip based on selections from the GUI components
     private void animateTrip() {
         // Retrieve selected options
         int animationTime = (int) animationTimeComboBox.getSelectedItem();
         boolean includeStops = stopsCheckBox.isSelected();
 
         // Clear previous animation
-        map().removeAll();
+        map().removeAllMapMarkers();
 
         // Get animated trip points based on selected options
         animatedTrip = includeStops ? TripPoint.getTrip().toArray(new TripPoint[0]) : TripPoint.getMovingTrip().toArray(new TripPoint[0]);
@@ -278,44 +296,76 @@ public class Driver extends JFrame implements JMapViewerEventListener {
 
         // Start animation
         new Thread(new Runnable() {
-            MapMarker prevMarker = null;
-            
+            Coordinate previousCoordinate = null;
+
+            IconMarker curr;
+
             @Override
             public void run() {
+
                 for (int i = 0; i < animatedTrip.length; i++) {
-                    TripPoint currentPoint = animatedTrip[i];
-                    Coordinate coordinate = new Coordinate(currentPoint.getLat(), currentPoint.getLon());
-                    IconMarker curr = new IconMarker(coordinate, new ImageIcon("raccoon.png").getImage());
-                    map().addMapMarker(curr);
+                    if(isPlaying){
+                        TripPoint currentPoint = animatedTrip[i];
+                        Coordinate coordinate = new Coordinate(currentPoint.getLat(), currentPoint.getLon());
+                        curr = new IconMarker(coordinate, new ImageIcon("raccoon.png").getImage());
+                        map().addMapMarker(curr);
 
-                    MapMarker currMarker = new MapMarkerDot(coordinate);
+                        MapPolygonImpl dot = new MapPolygonImpl(previousCoordinate,previousCoordinate,coordinate);
+                        dot.setColor(Color.RED);
+                        dot.setBackColor(Color.RED);
 
-                    // Connect the current point with the previous point
-                    if (prevMarker != null) {
-                        drawLine(prevMarker.getCoordinate(), currMarker.getCoordinate());
+
+                        map().addMapPolygon(dot);
+
+                        SwingUtilities.invokeLater(() -> map().repaint());
+
+                        // Wait for next animation step
+                        try {
+                            Thread.sleep(interval);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                        map().removeMapMarker(curr);
+
+                        previousCoordinate = coordinate;
                     }
-                    prevMarker = currMarker;
-
-                    SwingUtilities.invokeLater(() -> map().repaint());
-
-                    // Wait for next animation step
-                    try {
-                        Thread.sleep(interval);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
+                    else {
+                        map().removeAllMapPolygons();
                     }
-                    map().addMapMarker(new MapMarkerDot(coordinate));
-                    map().removeMapMarker(curr);
                 }
                 playButton.setText("Play");
+                isPlaying = false;
+
+                animationTimeComboBox.setEnabled(true);
+                stopsCheckBox.setEnabled(true);
             }
         }).start();
     }
 
-    // Method to draw a line between two coordinates
-    private void drawLine(Coordinate start, Coordinate end) {
-        MapPolygonImpl line = new MapPolygonImpl(start, end);
-        map().addMapPolygon(line);
+
+    // Set the map center and zoom level
+    private void setMapCenterAndZoom() {
+        // Calculate bounding box of the trip
+        double minLat = Double.MAX_VALUE;
+        double maxLat = Double.MIN_VALUE;
+        double minLon = Double.MAX_VALUE;
+        double maxLon = Double.MIN_VALUE;
+        for (TripPoint point : trip) {
+            double lat = point.getLat();
+            double lon = point.getLon();
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+        }
+
+        // Calculate map center and zoom level
+        double centerLat = (minLat + maxLat) / 2;
+        double centerLon = (minLon + maxLon) / 2;
+        int zoom = (int) Math.max(maxLat - minLat, maxLon - minLon) * 100;
+
+        // Set map center and zoom level
+        map().setDisplayPosition(new Coordinate(centerLat, centerLon), zoom);
     }
     
 }
